@@ -1,0 +1,12 @@
+{
+  "algorithm": {
+    "model_batch_size": 512,
+    "policy_batch_size": 512
+  },
+  "seed": 0,
+  "max_hours": 3.0,
+  "save_interval": 500,
+  "log_interval": 25,
+  "experiment_name": "a3_reference_independent",
+  "tensorboard": true
+}

@@ -1,0 +1,198 @@
+"""Floating-base motion tracking: analytic heads from paper Appendix A."""
+
+from __future__ import annotations
+
+import torch
+
+from .contracts import ModelDimensions
+from .geometry import (
+    conjugate, heading, multiply, orientation_columns, orientation_error,
+    quaternion_to_rotation_vector, rotate, rotation_vector_to_quaternion,
+)
+
+
+class ReferenceTracking:
+    """SI state with xyzw quaternions; no simulator imports or robot constants.
+
+    The actor sees Table A.1 proprioception and future reference features only.
+    Future goals use the current reference's heading frame, an explicitly
+    documented choice where the paper does not specify the encoding.
+    """
+
+    control_period = 0.02
+
+    def __init__(self, kinematics, motions, default_positions, future_frames=10):
+        self.kinematics = kinematics
+        self.motions = motions
+        self.control_period = motions.control_period
+        self.device = kinematics.device
+        self.joint_count = len(kinematics.joint_names)
+        self.future_frames = future_frames
+        self.default_positions = torch.as_tensor(default_positions, dtype=torch.float32, device=self.device)
+        if self.default_positions.shape != (self.joint_count,):
+            raise ValueError("default_positions must follow the configured joint order")
+        goal_width = future_frames * (15 + 2 * self.joint_count)
+        self.dimensions = ModelDimensions(
+            state=13 + 2 * self.joint_count,
+            action=self.joint_count,
+            context=self.joint_count + 4,
+            observation=3 * self.joint_count + 6,
+            goal=goal_width,
+            model_features=14 + 4 * self.joint_count,
+            model_outputs=12 + 2 * self.joint_count,
+            state_errors=12 + 2 * self.joint_count,
+            critic=17 + 3 * self.joint_count + goal_width,
+        )
+        self.observation_noise = torch.tensor(
+            [0.01] * self.joint_count + [0.5] * self.joint_count
+            + [0.2] * 3 + [0.05] * 3 + [0.0] * self.joint_count,
+            device=self.device,
+        )
+        midpoint = (kinematics.lower_limits + kinematics.upper_limits) / 2
+        half_range = (kinematics.upper_limits - kinematics.lower_limits) * 0.45
+        self.soft_lower_limits = midpoint - half_range
+        self.soft_upper_limits = midpoint + half_range
+
+    def _gravity(self, state):
+        gravity = torch.zeros_like(state[..., :3])
+        gravity[..., 2] = -1
+        return rotate(conjugate(state[..., 3:7]), gravity)
+
+    def encode_dynamics(self, state, action, context):
+        inverse_rotation = conjugate(state[..., 3:7])
+        return torch.cat((
+            state[..., 2:3], self._gravity(state),
+            rotate(inverse_rotation, state[..., 7:10]),
+            rotate(inverse_rotation, state[..., 10:13]), state[..., 13:], action, context,
+        ), dim=-1)
+
+    def dynamics_target(self, state, next_state):
+        inverse_rotation = conjugate(state[..., 3:7])
+        return torch.cat((
+            rotate(inverse_rotation, next_state[..., :3] - state[..., :3]),
+            quaternion_to_rotation_vector(multiply(inverse_rotation, next_state[..., 3:7])),
+            rotate(inverse_rotation, next_state[..., 7:10] - state[..., 7:10]),
+            rotate(inverse_rotation, next_state[..., 10:13] - state[..., 10:13]),
+            next_state[..., 13:] - state[..., 13:],
+        ), dim=-1)
+
+    def integrate_prediction(self, state, prediction):
+        orientation = multiply(state[..., 3:7], rotation_vector_to_quaternion(prediction[..., 3:6]))
+        orientation = orientation / orientation.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        return torch.cat((
+            state[..., :3] + rotate(state[..., 3:7], prediction[..., :3]), orientation,
+            state[..., 7:10] + rotate(state[..., 3:7], prediction[..., 6:9]),
+            state[..., 10:13] + rotate(state[..., 3:7], prediction[..., 9:12]),
+            state[..., 13:] + prediction[..., 12:],
+        ), dim=-1)
+
+    def state_error(self, predicted, target):
+        return torch.cat((
+            predicted[..., :3] - target[..., :3],
+            orientation_error(predicted[..., 3:7], target[..., 3:7]),
+            predicted[..., 7:] - target[..., 7:],
+        ), dim=-1)
+
+    def observation(self, state, previous_action, context):
+        joint_positions = state[..., 13 : 13 + self.joint_count]
+        # Calibration offsets describe the encoder reading. The simulator uses
+        # the inverse offset when converting a measured setpoint to joint angle.
+        measured_positions = joint_positions + context[..., 1 : 1 + self.joint_count]
+        return torch.cat((
+            measured_positions - self.default_positions,
+            state[..., 13 + self.joint_count :],
+            rotate(conjugate(state[..., 3:7]), state[..., 10:13]),
+            self._gravity(state), previous_action,
+        ), dim=-1)
+
+    def goal(self, state, reference_index):
+        reference = self.motions.states[reference_index]
+        future = self.motions.states[self.motions.future_indices(reference_index, self.future_frames)]
+        inverse_heading = conjugate(heading(reference[..., 3:7]))[..., None, :]
+        displacement = future[..., :3] - reference[..., None, :3]
+        relative_position = rotate(inverse_heading, displacement)
+        relative_position = torch.cat((relative_position[..., :2], future[..., 2:3]), dim=-1)
+        relative_rotation = multiply(inverse_heading.expand_as(future[..., 3:7]), future[..., 3:7])
+        features = torch.cat((
+            relative_position, orientation_columns(relative_rotation),
+            rotate(inverse_heading, future[..., 7:10]),
+            rotate(inverse_heading, future[..., 10:13]), future[..., 13:],
+        ), dim=-1)
+        return features.flatten(start_dim=-2)
+
+    def reward_terms(self, state, action, previous_action, reference_index):
+        reference = self.motions.states[reference_index]
+        positions, orientations, linear_velocities, angular_velocities = self.kinematics.forward(state)
+        (
+            reference_positions,
+            reference_orientations,
+            reference_linear,
+            reference_angular,
+        ) = self.kinematics.forward(reference)
+        heading_alignment = multiply(
+            heading(state[..., 3:7]), conjugate(heading(reference[..., 3:7]))
+        )
+        aligned_anchor = torch.cat((state[..., :2], reference[..., 2:3]), dim=-1)
+        aligned_positions = aligned_anchor[..., None, :] + rotate(
+            heading_alignment[..., None, :], reference_positions - reference[..., None, :3]
+        )
+        aligned_orientations = multiply(
+            heading_alignment[..., None, :].expand_as(reference_orientations), reference_orientations
+        )
+        position_error = (positions - aligned_positions).square().sum(dim=-1).mean(dim=-1)
+        body_orientation_error = (
+            orientation_error(orientations, aligned_orientations)
+            .square()
+            .sum(dim=-1)
+            .mean(dim=-1)
+        )
+        linear_error = (linear_velocities - reference_linear).square().sum(dim=-1).mean(dim=-1)
+        angular_error = (angular_velocities - reference_angular).square().sum(dim=-1).mean(dim=-1)
+        root_position_error = (state[..., :3] - reference[..., :3]).square().sum(dim=-1)
+        root_orientation_error = orientation_error(state[..., 3:7], reference[..., 3:7]).square().sum(dim=-1)
+        joint_positions = state[..., 13 : 13 + self.joint_count]
+        limit_violation = (
+            (self.soft_lower_limits - joint_positions).clamp_min(0)
+            + (joint_positions - self.soft_upper_limits).clamp_min(0)
+        ).sum(dim=-1)
+        return {
+            "body_position": torch.exp(-position_error / 0.3**2),
+            "body_orientation": torch.exp(-body_orientation_error / 0.4**2),
+            "body_linear_velocity": torch.exp(-linear_error),
+            "body_angular_velocity": torch.exp(-angular_error / 3.14**2),
+            "root_position": 0.5 * torch.exp(-root_position_error / 0.3**2),
+            "root_orientation": 0.5 * torch.exp(-root_orientation_error / 0.4**2),
+            "action_change": -0.1 * (action - previous_action).square().sum(dim=-1),
+            "joint_limit": -2 * limit_violation,
+        }
+
+    def reward(self, state, action, previous_action, reference_index):
+        return self.control_period * sum(
+            self.reward_terms(state, action, previous_action, reference_index).values()
+        )
+
+    def tracking_errors(self, state, reference_index):
+        reference = self.motions.states[reference_index]
+        height_error = (state[..., 2] - reference[..., 2]).abs()
+        tilt_error = (self._gravity(state)[..., 2] - self._gravity(reference)[..., 2]).abs()
+        return height_error, tilt_error
+
+    def terminated(self, state, reference_index):
+        height_error, tilt_error = self.tracking_errors(state, reference_index)
+        return (height_error > 0.25) | (tilt_error > 0.8)
+
+    def termination_probability(self, state, reference_index):
+        height_error, tilt_error = self.tracking_errors(state, reference_index)
+        # Softening temperatures are engineering choices, not paper constants.
+        height_probability = torch.sigmoid((height_error - 0.25) / 0.02)
+        tilt_probability = torch.sigmoid((tilt_error - 0.8) / 0.04)
+        return 1 - (1 - height_probability) * (1 - tilt_probability)
+
+    def critic_features(self, state, reference_index, context):
+        return torch.cat((state, self.goal(state, reference_index), context), dim=-1)
+
+    def valid_starts(self, reference_index, horizon):
+        return reference_index + horizon <= self.motions.frame_ends[reference_index]
+
+    def advance_reference(self, reference_index):
+        return reference_index + 1

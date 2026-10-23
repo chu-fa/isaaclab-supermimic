@@ -1,0 +1,22 @@
+{
+  "algorithm": {
+    "model_widths": [32, 32],
+    "encoder_widths": [32],
+    "decoder_widths": [32],
+    "critic_widths": [32],
+    "history_frames": 2,
+    "future_frames": 2,
+    "model_window": 2,
+    "imagination_steps": 3,
+    "model_batch_size": 8,
+    "policy_batch_size": 8,
+    "model_batches": 1,
+    "critic_epochs": 1,
+    "critic_minibatches": 1
+  },
+  "replay_steps": 32,
+  "initial_collection_steps": 16,
+  "log_interval": 1,
+  "save_interval": 1,
+  "max_iterations": 2
+}

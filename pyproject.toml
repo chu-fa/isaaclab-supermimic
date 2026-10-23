@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supermimic-lab"
+version = "0.1.0.dev1"
+description = "Independent paper-based SuperMimic implementation with Isaac Lab integration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["torch>=2.5", "numpy>=1.26", "gymnasium>=1.0"]
+
+[project.scripts]
+supermimic-train = "supermimic_lab.train:main"
+supermimic-play = "supermimic_lab.play:main"
+supermimic-evaluate = "supermimic_lab.evaluate:main"
+
+[project.optional-dependencies]
+logging = ["tensorboard>=2.14"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+supermimic_lab = ["presets/*.json"]

@@ -1,0 +1,8 @@
+{
+  "algorithm": {
+    "model_batch_size": 512,
+    "policy_batch_size": 512
+  },
+  "save_interval": 500,
+  "log_interval": 25
+}

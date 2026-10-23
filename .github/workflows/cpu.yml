@@ -1,0 +1,38 @@
+name: CPU learner and package
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install 'setuptools>=77' numpy gymnasium
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install --no-deps --no-build-isolation . ./examples/a3
+      - name: Check learner and motion behavior
+        run: python -m unittest discover -s tests -v
+      - name: Verify task discovery without simulator imports
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import sys
+          import gymnasium
+          import supermimic_lab
+          import supermimic_lab.isaaclab
+          assert 'SuperMimic-Lab-Tracking-A3-v0' not in gymnasium.registry
+          core = importlib.metadata.distribution('supermimic-lab')
+          assert not any('supermimic-lab-a3' in item for item in core.requires or [])
+          distribution = importlib.metadata.distribution('supermimic-lab-a3')
+          for entry in distribution.entry_points:
+              if entry.group == 'isaaclab.tasks':
+                  entry.load()
+          assert gymnasium.spec('SuperMimic-Lab-Tracking-A3-v0')
+          assert 'isaaclab' not in sys.modules
+          PY

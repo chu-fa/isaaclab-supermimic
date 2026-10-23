@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "Please cite the SuperMimic paper when using this independent implementation."
+title: "SuperMimic Lab: independent Isaac Lab implementation"
+type: software
+license: MIT
+authors:
+  - name: "SuperMimic Lab contributors"
+references:
+  - type: preprint
+    title: "SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World Model"
+    authors:
+      - family-names: Liao
+        given-names: Qiayuan
+      - family-names: Shao
+        given-names: Yiyang
+      - family-names: Long
+        given-names: Junfeng
+      - family-names: Zakka
+        given-names: Kevin
+      - family-names: Horowitz
+        given-names: Roberto
+      - family-names: Abbeel
+        given-names: Pieter
+      - family-names: Sreenath
+        given-names: Koushil
+    year: 2026
+    url: "https://arxiv.org/abs/2610.28480"

@@ -1,0 +1,40 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+data/
+/runs
+*.pt
+*.onnx
+*.mp4
+*.npz
+*.pdf
+.pytest_cache/
+
+# Local development notes and run artifacts are not release source.
+.local/
+/experiments/
+.env
+.env.*
+
+# Private training and experiment outputs.
+/logs/
+/results/
+/checkpoints/
+/artifacts/
+wandb/
+events.out.tfevents.*
+*.ckpt
+*.pth
+*.safetensors
+*.log
+*.pem
+*.key
+
+# Experiment records are retained locally until a separate results publication.
+/examples/a3/results/
+/examples/a3/data_manifest.json
+/docs/validation/
+/docs/split_package_validation.json
