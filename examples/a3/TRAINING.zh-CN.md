@@ -86,6 +86,10 @@ PD 使用示例自己的运行参数，见 [runtime_profile.json](runtime_profil
 输出清单记录逐段来源、时间缩放、拟合误差、支撑滑移与离地检查；这些检查不等于动力学可执行性认证。
 
 新配置为 `configs/a3_direct_4096.json`，启动时使用 `--num-envs 4096 --hours 3`。
+该配置使用模型/策略批次 2048/2048 并开启 `compile_steps`：在单张 RTX 3090 上
+约 1.16 s/更新、峰值显存约 17.8 GB；论文的 2048/4096 在 24 GB 显存上会 OOM。
+首次更新前有约 1–2 分钟编译。评估不计入预算，建议 `--eval-every 2000`，
+监督进程总超时按学习预算加评估时间留足（例如 3 小时预算设 7 小时）。
 最终参考动作先在 50 Hz 控制网格完成地面校正，启动时同时指定
 `--env-config configs/a3_direct_50hz_env.json`，避免再次按 30 Hz 解读。
 省略 `--checkpoint` 即从零新建 actor、世界模型、critic、归一化与优化器。

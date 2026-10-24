@@ -53,7 +53,7 @@ def parse_arguments():
         if operation == "train":
             command.add_argument("--hours", type=positive_hours, default=3.0)
             command.add_argument("--seed", type=int, default=0)
-            command.add_argument("--eval-every", type=positive_integer, default=1000)
+            command.add_argument("--eval-every", type=positive_integer, default=2000)
             command.add_argument("--stop-on-plateau", action="store_true")
         else:
             command.add_argument("--clips", type=int, nargs="+")
@@ -88,7 +88,8 @@ def build_command(arguments, project):
             "--source", str(project),
             "--task-source", str(project / "examples/a3/src"),
             "--output", str(arguments.output.resolve()),
-            "--process-timeout", str(arguments.hours * 3600 + 1800),
+            # Periodic evaluation runs outside the learner budget; leave room for it.
+            "--process-timeout", str(arguments.hours * 7200 + 3600),
             "--", *task_arguments,
         ]
     task_arguments.extend(["--output", str(arguments.output.resolve())])

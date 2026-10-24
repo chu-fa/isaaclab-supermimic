@@ -1,11 +1,12 @@
 {
   "algorithm": {
-    "model_batch_size": 512,
-    "policy_batch_size": 512
+    "model_batch_size": 2048,
+    "policy_batch_size": 2048,
+    "compile_steps": true
   },
   "seed": 0,
   "max_hours": 3.0,
-  "save_interval": 500,
+  "save_interval": 1000,
   "log_interval": 25,
   "experiment_name": "a3_lafan1_direct_4096",
   "tensorboard": true

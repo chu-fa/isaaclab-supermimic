@@ -65,9 +65,9 @@ Networks start from scratch unless `--checkpoint` is explicitly provided.
 
 The supervisor freezes source/configuration and records runtime versions,
 checksums, metrics and checkpoints in a new output directory. Initial evaluation
-and every 1000 updates evaluate all supplied clips. The three-hour learner budget
-starts after warmup and initial evaluation; the supervisor has a separate
-3.5-hour process timeout with a 90-second termination grace period. Ctrl+C requests
+and every 2000 updates evaluate all supplied clips. The three-hour learner budget
+starts after warmup and initial evaluation and excludes periodic evaluation; the
+supervisor has a separate 7-hour process timeout with a 90-second termination grace period. Ctrl+C requests
 saving at an update boundary and cancels the final automatic evaluation.
 
 Optional `--stop-on-plateau` can stop after at least one hour and three complete
