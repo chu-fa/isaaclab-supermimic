@@ -34,6 +34,7 @@ def main():
                 "implementation": "independent-paper-reimplementation",
                 "actor_inputs": "proprioception history and future reference goals",
                 "goal_frame": getattr(environment.model_task, "goal_frame", None),
+                "goal_offset_limit": getattr(environment.model_task, "goal_offset_limit", None),
                 "critic_and_world_model": "privileged simulator state and context",
                 "long_training_validated": False,
                 "evaluation_interval": arguments.eval_every,

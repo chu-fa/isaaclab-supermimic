@@ -45,6 +45,16 @@ This follows BeyondMimic's anchor observations and makes the global root
 position/orientation and world-frame velocity reward terms observable. It uses
 the robot's root position and yaw, which hardware must estimate.
 
+The horizontal robot-to-reference offset in that goal is saturated at
+`goal_offset_limit` (1 m by default; direction kept, length capped). Training
+episodes start on the reference and last at most 20 s, while evaluation clips run
+for minutes. With an unbounded offset, an A3 run's heading error fell to 0.07 rad
+but XY drift grew from 4.9 m to 8.9 m on average between 2000 and 4000 updates,
+with failures up to 76 m from the reference: once drift left the training range,
+the goal inputs did too, and the root-position reward (σ = 0.3 m) gives no
+gradient back. `goal_offset_limit: null` restores the unbounded encoding for
+checkpoints from those runs.
+
 `goal_frame="reference"` keeps the earlier encoding relative to the current
 reference itself. It hides heading and position drift from actor and critic:
 in an earlier LAFAN1 test run, completed clips drifted by 1.5 rad in heading and

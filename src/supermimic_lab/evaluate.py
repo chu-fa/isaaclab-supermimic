@@ -23,7 +23,8 @@ def load_policy(path, environment, configuration):
         raise ValueError(
             "Evaluation robot/reference contract differs from the checkpoint; "
             "tracking checkpoints from before goal_frame existed need "
-            '{"goal_frame": "reference"} in the environment configuration'
+            '{"goal_frame": "reference"} and the first robot-frame runs need '
+            '{"goal_offset_limit": null} in the environment configuration'
         )
     policy = MotionPolicy(environment.model_task.dimensions, configuration.algorithm).to(environment.device)
     policy.load_state_dict(checkpoint["learner"]["policy"])

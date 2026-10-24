@@ -64,7 +64,8 @@ class TrackingEnvironment(DirectRLEnv):
             source_rate=cfg.source_motion_rate, control_period=self.step_dt,
         )
         self.model_task = ReferenceTracking(
-            kinematics, motions, self.default_positions, cfg.future_frames, goal_frame=cfg.goal_frame
+            kinematics, motions, self.default_positions, cfg.future_frames,
+            goal_frame=cfg.goal_frame, goal_offset_limit=cfg.goal_offset_limit,
         )
         self.sampler = ReturnSampler(motions, cfg.discount)
         self.previous_action = torch.zeros(self.num_envs, len(joint_names), device=self.device)
@@ -87,6 +88,8 @@ class TrackingEnvironment(DirectRLEnv):
         if cfg.goal_frame != "reference":
             # Omitted for the original encoding so existing signatures still match.
             contract["goal_frame"] = cfg.goal_frame
+            if cfg.goal_offset_limit is not None:
+                contract["goal_offset_limit"] = cfg.goal_offset_limit
         self.signature = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
         self.asset_contract = contract
 

@@ -157,7 +157,7 @@ class TrackingTests(unittest.TestCase):
         # On the reference, both encodings describe the same future poses.
         torch.testing.assert_close(self.task.goal(reference, index), legacy.goal(reference, index))
         drifted = reference.clone()
-        drifted[:, :2] += torch.tensor([3.0, -2.0])
+        drifted[:, :2] += torch.tensor([0.6, -0.4])  # inside the 1 m offset limit
         drifted[:, 3:7] = torch.tensor([0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)])
         frames = self.task.goal(drifted, index).reshape(2, -1)
         expected_offset = self.motions.states[1:3, :2] - drifted[:, :2]
@@ -176,6 +176,24 @@ class TrackingTests(unittest.TestCase):
         moved = drifted.clone()
         moved[:, :2] += 5
         torch.testing.assert_close(shifted.critic_features(moved, index, context), critic)
+
+    def test_robot_frame_goal_saturates_large_drift(self):
+        reference = self.motions.states[:1].clone()
+        index = torch.zeros(1, dtype=torch.long)
+        unbounded = ReferenceTracking(self.tree, self.motions, [0.0], 2, goal_offset_limit=None)
+        near = reference.clone()
+        near[:, :2] += torch.tensor([0.3, 0.2])
+        torch.testing.assert_close(self.task.goal(near, index), unbounded.goal(near, index))
+        far = reference.clone()
+        far[:, :2] += torch.tensor([30.0, -40.0])
+        frames = self.task.goal(far, index).reshape(2, -1)
+        # Only the direction of a 50 m offset remains, at the 1 m limit.
+        expected = self.motions.states[1:3, :2] - reference[:, :2] + torch.tensor([-0.6, 0.8])
+        torch.testing.assert_close(frames[:, :2], expected)
+        self.assertGreater(float(unbounded.goal(far, index).abs().max()), 30)
+        state = far.clone().requires_grad_()
+        self.task.goal(state, index).sum().backward()
+        self.assertTrue(bool(torch.isfinite(state.grad).all()))
 
     def test_batched_tree_matches_sequential_joint_evaluation(self):
         urdf = Path(self.directory.name) / "branched.urdf"

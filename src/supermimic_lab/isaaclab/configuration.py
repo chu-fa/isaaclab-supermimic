@@ -30,6 +30,9 @@ class TrackingEnvironmentConfig(DirectRLEnvCfg):
     # "robot": future reference poses relative to the robot's position/heading.
     # "reference": the earlier self-relative encoding, for older checkpoints.
     goal_frame: str = "robot"
+    # Saturation radius (m) of the robot-to-reference XY offset in robot-frame
+    # goals; None leaves it unbounded as in the first robot-frame runs.
+    goal_offset_limit: float | None = 1.0
     # Nominal physics is an explicit development setting, not paper-equivalent DR.
     randomization: str = "nominal"
     evaluation: bool = False

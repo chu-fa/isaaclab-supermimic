@@ -21,19 +21,29 @@ class ReferenceTracking:
     ``goal_frame="robot"`` expresses future reference root poses and velocities
     in the robot's current position and heading frame, as BeyondMimic's anchor
     observations do, so the global root and world-velocity reward terms are
-    observable. ``"reference"`` reproduces the earlier encoding in the current
-    reference's own frame, which hides heading and position drift from the
-    actor and critic; it remains available to evaluate older checkpoints.
+    observable. The horizontal robot-to-reference offset is saturated at
+    ``goal_offset_limit`` metres: training episodes start on the reference, so
+    multi-metre drift on long clips would otherwise drive the goal far outside
+    the training distribution. ``"reference"`` reproduces the earlier encoding
+    in the current reference's own frame, which hides heading and position
+    drift from the actor and critic; it remains available to evaluate older
+    checkpoints.
     """
 
     control_period = 0.02
 
-    def __init__(self, kinematics, motions, default_positions, future_frames=10, *, goal_frame="robot"):
+    def __init__(
+        self, kinematics, motions, default_positions, future_frames=10, *,
+        goal_frame="robot", goal_offset_limit=1.0,
+    ):
         if goal_frame not in GOAL_FRAMES:
             raise ValueError(f"goal_frame must be one of {GOAL_FRAMES}")
+        if goal_offset_limit is not None and not goal_offset_limit > 0:
+            raise ValueError("goal_offset_limit must be positive or None")
         self.kinematics = kinematics
         self.motions = motions
         self.goal_frame = goal_frame
+        self.goal_offset_limit = goal_offset_limit
         self.control_period = motions.control_period
         self.device = kinematics.device
         self.joint_count = len(kinematics.joint_names)
@@ -127,10 +137,17 @@ class ReferenceTracking:
         ), dim=-1)
 
     def goal(self, state, reference_index):
+        reference = self.motions.states[reference_index]
         future = self.motions.states[self.motions.future_indices(reference_index, self.future_frames)]
-        frame = state if self.goal_frame == "robot" else self.motions.states[reference_index]
+        frame = state if self.goal_frame == "robot" else reference
         inverse_heading = conjugate(heading(frame[..., 3:7]))[..., None, :]
-        displacement = future[..., :3] - frame[..., None, :3]
+        displacement = future[..., :3] - reference[..., None, :3]
+        if self.goal_frame == "robot":
+            offset = reference[..., :2] - state[..., :2]
+            if self.goal_offset_limit is not None:
+                distance = offset.norm(dim=-1, keepdim=True)
+                offset = offset * (self.goal_offset_limit / distance.clamp_min(self.goal_offset_limit))
+            displacement = displacement + torch.nn.functional.pad(offset, (0, 1))[..., None, :]
         relative_position = rotate(inverse_heading, displacement)
         relative_position = torch.cat((relative_position[..., :2], future[..., 2:3]), dim=-1)
         relative_rotation = multiply(inverse_heading.expand_as(future[..., 3:7]), future[..., 3:7])

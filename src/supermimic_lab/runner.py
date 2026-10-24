@@ -112,7 +112,8 @@ class SuperMimicRunner:
             raise ValueError(
                 "Checkpoint robot/reference contract differs from the current task; "
                 "tracking checkpoints from before goal_frame existed need "
-                '{"goal_frame": "reference"} in the environment configuration'
+                '{"goal_frame": "reference"} and the first robot-frame runs need '
+                '{"goal_offset_limit": null} in the environment configuration'
             )
         self.algorithm.load_state_dict(checkpoint["learner"])
         self.iteration = checkpoint["iteration"]
