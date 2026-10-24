@@ -11,6 +11,7 @@ import torch
 from supermimic_lab.geometry import orientation_error
 from supermimic_lab.kinematics import KinematicTree
 from supermimic_lab.motions import MotionLibrary
+from supermimic_lab.metrics import TrackingMetricAccumulator
 from supermimic_lab.sampling import ReturnSampler
 from supermimic_lab.tracking import ReferenceTracking
 
@@ -96,6 +97,28 @@ class TrackingTests(unittest.TestCase):
         self.assertFalse(bool(self.task.terminated(reference, index)))
         self.assertEqual(self.task.goal(reference, index).shape[-1], self.task.dimensions.goal)
         self.assertEqual(self.task.encode_dynamics(reference, action, context).shape[-1], self.task.dimensions.model_features)
+
+
+    def test_direct_metrics_distinguish_global_drift_from_pose(self):
+        reference = self.motions.states[:1].clone()
+        index = torch.zeros(1, dtype=torch.long)
+        for value in self.task.tracking_metrics(reference, index).values():
+            torch.testing.assert_close(value, torch.zeros_like(value), atol=1e-6, rtol=0)
+        displaced = reference.clone()
+        displaced[:, :2] += torch.tensor([3.0, 4.0])
+        displaced[:, 3:7] = torch.tensor([0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)])
+        metrics = self.task.tracking_metrics(displaced, index)
+        self.assertAlmostEqual(float(metrics["root_horizontal_error_m"]), 5.0, places=5)
+        self.assertAlmostEqual(float(metrics["root_heading_error_rad"]), math.pi / 2, places=5)
+        self.assertLess(float(metrics["aligned_body_position_rms_m"]), 1e-6)
+        self.assertFalse(bool(self.task.terminated(displaced, index)))
+
+    def test_metric_accumulation_excludes_finished_worlds(self):
+        accumulator = TrackingMetricAccumulator(2, "cpu")
+        accumulator.update({"distance_m": torch.tensor([2.0, 4.0])}, torch.tensor([True, True]))
+        accumulator.update({"distance_m": torch.tensor([100.0, 6.0])}, torch.tensor([False, True]))
+        self.assertEqual(accumulator.record(0)["distance_m"], {"mean": 2.0, "max": 2.0, "final": 2.0})
+        self.assertEqual(accumulator.record(1)["distance_m"], {"mean": 5.0, "max": 6.0, "final": 6.0})
 
 
 if __name__ == "__main__":

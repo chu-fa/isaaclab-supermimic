@@ -43,6 +43,11 @@ def main():
             project / name, frozen / name,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
         )
+    if (project / "data_processing").is_dir():
+        shutil.copytree(
+            project / "data_processing", frozen / "data_processing",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
     for name in ("pyproject.toml", "README.md", "LICENSE", "PROVENANCE.md"):
         shutil.copyfile(project / name, frozen / name)
     frozen_task_directories = []

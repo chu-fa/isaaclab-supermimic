@@ -42,3 +42,8 @@ Follow the [A3 protocol](../examples/a3/EVALUATION.md). Report complete and fail
 clips, return and coverage, while distinguishing completion from tracking accuracy.
 Convergence, backend equivalence, held-out generalization and hardware transfer
 require their own evidence. Multi-interface joint training remains unimplemented.
+
+## Tracking diagnostics
+
+Direct-error tests verify a 3-4-5 m global displacement remains visible after
+body-pose alignment and that finished worlds stop contributing.

@@ -171,6 +171,31 @@ class ReferenceTracking:
             self.reward_terms(state, action, previous_action, reference_index).values()
         )
 
+    def tracking_metrics(self, state, reference_index):
+        """Direct errors in SI units; global drift and aligned pose stay separate."""
+        reference = self.motions.states[reference_index]
+        positions, orientations, _, _ = self.kinematics.forward(state)
+        reference_positions, reference_orientations, _, _ = self.kinematics.forward(reference)
+        alignment = multiply(heading(state[..., 3:7]), conjugate(heading(reference[..., 3:7])))
+        anchor = torch.cat((state[..., :2], reference[..., 2:3]), dim=-1)
+        aligned_positions = anchor[..., None, :] + rotate(
+            alignment[..., None, :], reference_positions - reference[..., None, :3]
+        )
+        aligned_orientations = multiply(
+            alignment[..., None, :].expand_as(reference_orientations), reference_orientations
+        )
+        joint_error = state[..., 13:13 + self.joint_count] - reference[..., 13:13 + self.joint_count]
+        return {
+            "root_horizontal_error_m": (state[..., :2] - reference[..., :2]).norm(dim=-1),
+            "root_height_error_m": (state[..., 2] - reference[..., 2]).abs(),
+            "root_orientation_error_rad": orientation_error(state[..., 3:7], reference[..., 3:7]).norm(dim=-1),
+            "root_heading_error_rad": orientation_error(heading(state[..., 3:7]), heading(reference[..., 3:7])).norm(dim=-1),
+            "root_linear_velocity_error_m_s": (state[..., 7:10] - reference[..., 7:10]).norm(dim=-1),
+            "joint_rmse_rad": joint_error.square().mean(dim=-1).sqrt(),
+            "aligned_body_position_rms_m": (positions - aligned_positions).square().sum(dim=-1).mean(dim=-1).sqrt(),
+            "aligned_body_orientation_rms_rad": orientation_error(orientations, aligned_orientations).square().sum(dim=-1).mean(dim=-1).sqrt(),
+        }
+
     def tracking_errors(self, state, reference_index):
         reference = self.motions.states[reference_index]
         height_error = (state[..., 2] - reference[..., 2]).abs()

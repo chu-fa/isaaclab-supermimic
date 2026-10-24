@@ -25,9 +25,10 @@ is an example configuration, not an official controller release.
 
 Models, generated USD and motion CSVs are not bundled in wheels. Compatible
 A3-retargeted motions remain a separate required input under their applicable
-licenses. No public download for the exact prepared motion bundle or a complete
-A3 retargeting pipeline is provided. Supply permitted, compatible reference
-motions and retain their source and checksums with each experiment.
+licenses. A [direct original-LAFAN1 preparation pipeline](../../data_processing/README.md)
+is provided in this source checkout. It downloads the pinned human BVH archive,
+retargets to the official A3 model and records per-clip quality checks. Prepared
+motion CSVs are not redistributed. Retain source and checksums with each experiment.
 
 ## Robot files
 
@@ -72,7 +73,10 @@ Each file in `--motion-dir` is a headerless CSV:
 | 3–6 | Root orientation | Quaternion XYZW |
 | 7–37 | 31 joint positions | Radians, profile joint order |
 
-Source rate is 30 Hz. The task resamples to 50 Hz using linear position/joint
+The default source rate is 30 Hz. The direct preparation pipeline also provides
+a finalized 50 Hz control-grid bundle; use `configs/a3_direct_50hz_env.json` with
+that bundle. The configured source rate must match the files. The task otherwise
+resamples to 50 Hz using linear position/joint
 interpolation and shortest-arc quaternion interpolation, then estimates velocities
 by finite differences. Motion lookup respects clip boundaries. G1 references
 cannot be supplied directly without A3 retargeting.
@@ -80,8 +84,8 @@ cannot be supplied directly without A3 retargeting.
 ## Preparing reference motions
 
 Human motion datasets such as LAFAN1 require retargeting to the A3 morphology and
-joint convention. A preparation pipeline may use body targets, constrained inverse
-kinematics, contact correction and smoothing. Validate joint limits and physical
+joint convention. The supplied pipeline uses body targets, constrained inverse kinematics,
+stationary-support constraints and joint temporal optimization. Validate joint limits and physical
 feasibility before using a prepared library for training.
 
 The loader uses all compatible CSV files in the supplied directory. Record data

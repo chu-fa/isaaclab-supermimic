@@ -10,6 +10,8 @@ from PIL import Image
 from PIL import ImageDraw
 import torch
 
+from mp4_timing import finalize_mp4_timing
+
 from supermimic_lab.cli import parser_for
 from supermimic_lab.cli import runner_configuration
 from supermimic_lab.cli import simulation_environment
@@ -99,12 +101,14 @@ def record_clip(environment, policy, encoder, clip_name, seconds, directory, ite
         encoder.finalize_encoding()
     if not video_path.is_file() or video_path.stat().st_size < 1024:
         raise RuntimeError("No usable MP4 file was produced")
+    timing = finalize_mp4_timing(video_path, rendered_frames, frame_rate)
     return {
         "clip": clip_name,
         "file": video_path.name,
         "sha256": hashlib.sha256(video_path.read_bytes()).hexdigest(),
         "bytes": video_path.stat().st_size,
         "frame_rate": frame_rate,
+        "container_timing": timing,
         "frames": rendered_frames,
         "policy_seconds": executed_steps * environment.step_dt,
         "outcome": outcome,

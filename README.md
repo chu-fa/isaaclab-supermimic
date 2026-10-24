@@ -7,7 +7,7 @@ development across multiple personal robot motion control projects. It provides 
 training interface and an AGIBOT A3 robot training example.
 
 **One repository contains both the reusable interface and the A3 application.**
-The two Python packages can be installed separately:
+The core and optional robot examples can be installed separately:
 
 | Package | Purpose | Location |
 | --- | --- | --- |
@@ -98,6 +98,7 @@ the same public interface with AGIBOT A3 and retargeted reference motions. It in
 - Training, evaluation and optional visualization commands.
 - A 2048-environment, single-GPU configuration with full network widths.
 - [Data format and availability](examples/a3/DATA.md).
+- [Direct original-LAFAN1 preparation and fresh 4096-environment training](data_processing/README.md).
 - [Evaluation protocol and metric definitions](examples/a3/EVALUATION.md).
 
 The example provides a pinned official A3 model downloader, an Isaac Lab USD

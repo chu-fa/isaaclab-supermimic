@@ -36,8 +36,14 @@ by the project's MIT license. Runtime motor parameters are supplied as example
 configuration, with their configuration-source digest retained; they are not a
 controller distributed by that official model repository.
 
-A3-retargeted reference motions remain external. Preparation requirements,
-format and availability are described in [DATA.md](examples/a3/DATA.md).
+A3-retargeted reference motions remain external. The direct preparation tools
+read the original [Ubisoft LAFAN1 BVH data](https://github.com/ubisoft/ubisoft-laforge-animation-dataset)
+at commit `94084601bacdf9cc3764b5c73daaeccae6035fac`, without G1 trajectories.
+The BVH parser and A3 solver are independently written; the upstream data
+description and BVH loading conventions were consulted. No upstream parser or
+retargeting source is included. Preparation requirements and limitations are in
+[the data preparation guide](data_processing/README.md); format and availability
+are described in [DATA.md](examples/a3/DATA.md).
 
 Collision exclusion pairs in the A3 task are physical assembly metadata derived
 from asset diagnostics. They are robot-specific configuration, not algorithm

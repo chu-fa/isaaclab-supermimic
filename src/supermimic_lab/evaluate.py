@@ -13,6 +13,7 @@ from .cli import (
     task_specification,
 )
 from .networks import MotionPolicy
+from .metrics import TrackingMetricAccumulator
 from .runner import PolicySession
 
 
@@ -49,6 +50,8 @@ def evaluate_clips(
         tracked = torch.zeros_like(clips)
         failure_height = torch.zeros_like(returns)
         failure_tilt = torch.zeros_like(returns)
+        metric_function = getattr(environment.model_task, "tracking_metrics", None)
+        direct_metrics = TrackingMetricAccumulator(actual_count, environment.device)
         expected_steps = motions.lengths[clips] - 1
         limit = int(expected_steps.max())
         if max_steps is not None:
@@ -80,6 +83,15 @@ def evaluate_clips(
             )
             environment.step(action)
             transition = environment.last_transition
+            if callable(metric_function):
+                reference_after = torch.minimum(
+                    transition.reference_index[:actual_count] + 1,
+                    motions.frame_ends[transition.reference_index[:actual_count]],
+                )
+                direct_metrics.update(
+                    metric_function(transition.next_state[:actual_count], reference_after),
+                    alive[:actual_count],
+                )
             returns += transition.reward * alive
             tracked += alive.long()
             just_failed = alive & transition.terminated
@@ -108,12 +120,26 @@ def evaluate_clips(
                 ),
                 "return": float(returns[world_index]),
                 "normalized_return": float(returns[world_index] / (0.1 * expected_steps[world_index])),
+                "tracking_errors": direct_metrics.record(world_index),
                 "failure_height_error_m": float(failure_height[world_index]),
                 "failure_projected_gravity_z_error": float(failure_tilt[world_index]),
             })
         if interruption is not None:
             break
+    metric_names = set().union(*(record["tracking_errors"] for record in records))
+    metric_steps = sum(record["tracked_steps"] for record in records)
+    aggregate_errors = {
+        name: {
+            "mean": sum(record["tracking_errors"][name]["mean"] * record["tracked_steps"]
+                        for record in records if name in record["tracking_errors"]) / metric_steps,
+            "max": max(record["tracking_errors"][name]["max"]
+                       for record in records if name in record["tracking_errors"]),
+        }
+        for name in metric_names
+    } if metric_steps else {}
     return {
+        "tracking_errors": aggregate_errors,
+        "tracking_error_protocol": "Executed transitions including the failure step; aggregate means weighted by tracked frames. Unexecuted tails have no error sample. Aligned body metrics remove root XY and heading drift, which are reported separately.",
         "task_signature": environment.signature,
         "protocol": "first frame; deterministic actor; nominal physics; full-clip denominator",
         "complete_evaluation": (

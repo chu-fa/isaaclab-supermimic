@@ -97,7 +97,8 @@ nominal physics. Failure criteria and metric definitions are specified in the
 For visual playback, replace `evaluate` with `play`, add `--num-envs 1 --clips 0`,
 and use `--visualizer newton` for Newton or `--visualizer kit` for PhysX. A
 `--max-steps` limit can bound a preview; truncation is not counted as completion.
-Interactive rendering and video capture have not been validated.
+Interactive window playback has not been validated. Bounded offscreen A3 video
+recording is described below.
 
 ## Scope and limitations
 
@@ -143,6 +144,9 @@ Newton GL visualizer and Pillow. It uses Kit for the bundled MP4 encoder; physic
 remains Newton. Three predetermined clips cover walking, dancing and jumping.
 The recording ends on failure and adds an outcome card instead of showing an
 automatic reset. Metadata records the checkpoint hash and actual outcome.
-The CLI has been checked; rendering and encoding await the first post-training
-recording. Review the resulting video before publishing it. Host MP4 files as
-release assets or other external media and link them from the report.
+Bounded A3 recording has been checked with the existing Newton renderer and
+Isaac Sim encoder. The helper finalizes MP4 duration fields from the encoded
+frame count; this avoids an unknown-duration sentinel being displayed as an
+excessively long video. Review the actual player timeline and motion before
+publishing. Host MP4 files as release assets or other external media and link
+them from the report.

@@ -19,6 +19,7 @@ supermimic-evaluate = "supermimic_lab.evaluate:main"
 
 [project.optional-dependencies]
 logging = ["tensorboard>=2.14"]
+retarget = ["scipy>=1.11", "trimesh>=4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

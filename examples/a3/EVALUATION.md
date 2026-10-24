@@ -46,3 +46,9 @@ simulator state, history, reset sampling and RNG are reinitialized.
 Use `scripts/export_a3_results.py` to prepare a report from local run artifacts.
 Review the exported fields before publication. Keep raw trajectories, model
 weights and videos outside Git source history.
+
+New evaluations additionally record `tracking_errors` per clip (mean, maximum
+and final) and globally (executed-frame-weighted mean and maximum). Angles are
+in radians; body pose is aligned in root XY and heading, while global drift is
+reported separately. Errors include the failure transition but exclude unexecuted
+tails. Historical evaluation files are preserved and are not backfilled.

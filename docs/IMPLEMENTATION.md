@@ -124,3 +124,8 @@ divides actual accumulated reward by `.1 × all expected transitions`, including
 the untracked tail after failure. Positive return alone is not success. Active
 worlds continue until their clip finishes; completed worlds are excluded from
 further statistics.
+
+Direct evaluation diagnostics now report global root XY, heading/orientation,
+velocity and joint errors separately from body-pose errors after XY/heading
+alignment. These measurements do not change rewards, termination or actor
+observations.
