@@ -16,7 +16,7 @@ extensions. Passing an interface check is not evidence of tracking convergence.
 | Policy optimization | `algorithm.py` | Adam 2e-4, betas .9/.95, gradient norm 1 then element clip .1 |
 | Replay/update schedule | `runner.py` | 1000 steps/world; UTD .4; ten model batches; cosine learning rate to .03 of initial |
 | Proprioception and history | `tracking.py`, `runner.py` | Ten frames, joint offsets/rates, gyro, projected gravity, previous action; paper uniform noise |
-| Reference goal | `tracking.py:goal` | Ten future frames; exact feature encoding is an engineering choice |
+| Reference goal | `tracking.py:goal` | Ten future frames in the robot's position/heading frame by default; exact encoding is an engineering choice |
 | Appendix A reward and failures | `tracking.py` | Tracking, action-change and soft-limit terms; ×.02; height >.25 m or gravity-z error >.8 |
 | One-second return sampler | `sampling.py` | .5 uniform + .4 difficult + .1 historical; temperature 25; EMA rates are explicit choices |
 | Simulator context | Isaac Lab adapter | Nominal default; opt-in ranges from paper; Newton COM caveat below |
@@ -37,16 +37,26 @@ current body frame, linear/angular velocity increments in that frame, and joint
 position/rate increments. Model inputs omit absolute root XY and yaw. Model
 outputs are integrated directly; no unknown simulator state is used in imagination.
 
-The actor receives proprioception history and reference-only future goals. Its
-goal features contain relative future XY, absolute reference Z, orientation
-columns, velocities and joint states, all expressed relative to the **current
-reference heading**. They do not add live true root pose or velocity. This choice
-preserves the input boundary but leaves global heading/position errors
-unobservable directly; tracking quality must be measured. It is not a proven
-replacement for the paper authors' unspecified goal encoding.
+The actor receives proprioception history and ten future reference frames. With
+the default `goal_frame="robot"`, each frame contains the future root XY offset
+from the robot, absolute reference Z, orientation columns, velocities and joint
+states, all expressed in the **robot's current position and heading frame**.
+This follows BeyondMimic's anchor observations and makes the global root
+position/orientation and world-frame velocity reward terms observable. It uses
+the robot's root position and yaw, which hardware must estimate.
+
+`goal_frame="reference"` keeps the earlier encoding relative to the current
+reference itself. It hides heading and position drift from actor and critic:
+in an earlier LAFAN1 test run, completed clips drifted by 1.5 rad in heading and
+11 m in XY on average, and completed A3 clips earned only about half of the
+attainable per-step reward. It is kept so older checkpoints still load and
+evaluate. Neither encoding is claimed to be the paper authors' unspecified one.
 
 True simulator state and per-episode context are privileged inputs to the world
-model and critic and are used in reward/evaluation. Context is friction, J encoder
+model and critic and are used in reward/evaluation. With `goal_frame="robot"`,
+the critic receives the heading/position-invariant state (root height, gravity,
+body-frame velocities and joints), the robot-frame goal and context; absolute XY
+and yaw are omitted because the goal already carries the root pose error. Context is friction, J encoder
 zero offsets, and torso COM offsets. It is not appended to the actor observation.
 Encoder offset modifies sensed joint position; the commanded measured setpoint
 is converted to physical angle by subtracting that offset.
@@ -109,8 +119,25 @@ The optional `supermimic-lab-a3` distribution owns A3 registration and configura
 
 Checkpoints use the `supermimic_lab_v1` format. Other implementations' checkpoint
 formats are not supported. Task signatures include robot/model/profile hashes,
-joint/link order, motion fingerprint, backend, period, action scaling and collision
-exclusions. Incompatible weights are not silently mapped into the networks.
+joint/link order, motion fingerprint, backend, period, action scaling, collision
+exclusions and a non-default goal frame. Incompatible weights are not silently
+mapped into the networks. Checkpoints trained before `goal_frame` existed load
+only with `{"goal_frame": "reference"}` in the environment configuration.
+
+`max_hours` limits learner wall-clock time, excluding `after_update` callbacks
+such as periodic evaluation; the paper likewise does not count checkpoint
+evaluations. `metrics.csv` records both `elapsed_seconds` and `learning_seconds`.
+
+## Execution speed
+
+With eager PyTorch, the learner was limited by kernel launches rather than GPU
+arithmetic: one A3 update issued about 356k ATen operations, mostly link-by-link
+forward kinematics in every imagined reward. Reference link kinematics are now
+computed once per motion library, and the robot tree is evaluated one depth level
+at a time over only the tracked links' ancestors (about 169k operations per
+update). `compile_steps: true` additionally fuses each model-window and imagination
+step with `torch.compile`; it requires a working Inductor backend, adds a one-time
+compilation delay and leaves the objective unchanged.
 
 Resume restores networks, population statistics, all optimizers, update/step
 counters and cumulative training time. Replay, RNG, reset sampler, history and

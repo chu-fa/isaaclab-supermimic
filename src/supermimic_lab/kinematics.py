@@ -82,40 +82,84 @@ class KinematicTree:
         self.lower_limits = torch.tensor([limits[name][0] for name in joint_names], device=device)
         self.upper_limits = torch.tensor([limits[name][1] for name in joint_names], device=device)
         self.selected_indices = [self.link_names.index(name) for name in tracked_links]
+        self._build_levels()
 
     def _vector(self, text):
         return torch.tensor([float(value) for value in text.split()], device=self.device)
 
+    def _build_levels(self):
+        """Group the tracked links' ancestors by tree depth for batched evaluation.
+
+        Eager per-joint evaluation launches thousands of tiny kernels per call,
+        which dominated learner time. Links at one depth share a set of batched
+        operations; branches with no tracked descendant are skipped.
+        """
+        parents = [None] + [operation[0] for operation in self.operations]
+        depths = [0]
+        for parent in parents[1:]:
+            depths.append(depths[parent] + 1)
+        required = set()
+        for index in self.selected_indices:
+            while index is not None and index not in required:
+                required.add(index)
+                index = parents[index]
+        levels = [[0]]
+        for depth in range(1, max(depths[index] for index in required) + 1):
+            levels.append([index for index in sorted(required) if depths[index] == depth])
+        slots = {index: slot for level in levels for slot, index in enumerate(level)}
+        self.levels = []
+        for parent_level, level in zip(levels[:-1], levels[1:]):
+            operations = [self.operations[index - 1] for index in level]
+            for parent, *_ in operations:
+                if parent not in parent_level:
+                    raise AssertionError("Tree depth grouping is inconsistent")
+            # Fixed joints use a zero axis: no joint rotation or rate contribution.
+            self.levels.append((
+                torch.tensor([slots[parent] for parent, *_ in operations], device=self.device),
+                torch.stack([position for _, position, *_ in operations]),
+                torch.stack([rotation for _, _, rotation, *_ in operations]),
+                torch.tensor([
+                    0 if coordinate is None else coordinate for *_, coordinate, _ in operations
+                ], device=self.device),
+                torch.stack([
+                    torch.zeros_like(axis) if coordinate is None else axis
+                    for *_, coordinate, axis in operations
+                ]),
+            ))
+        offsets = [0]
+        for level in levels:
+            offsets.append(offsets[-1] + len(level))
+        level_of = {index: depth for depth, level in enumerate(levels) for index in level}
+        self.output_indices = torch.tensor([
+            offsets[level_of[index]] + slots[index] for index in self.selected_indices
+        ], device=self.device)
+
     def forward(self, state):
         """State order: root xyz, xyzw, world linear/angular velocity, q, qdot."""
         joint_count = len(self.joint_names)
-        positions = [state[..., :3]]
-        rotations = [state[..., 3:7]]
-        linear_velocities = [state[..., 7:10]]
-        angular_velocities = [state[..., 10:13]]
         joint_positions = state[..., 13 : 13 + joint_count]
         joint_velocities = state[..., 13 + joint_count :]
-        for parent, origin_position, origin_rotation, coordinate, axis in self.operations:
-            offset = rotate(rotations[parent], origin_position)
-            position = positions[parent] + offset
-            origin = origin_rotation.expand_as(rotations[parent])
-            rotation = multiply(rotations[parent], origin)
-            velocity = linear_velocities[parent] + torch.cross(angular_velocities[parent], offset, dim=-1)
-            angular_velocity = angular_velocities[parent]
-            if coordinate is not None:
-                world_axis = rotate(rotation, axis)
-                angular_velocity = angular_velocity + world_axis * joint_velocities[..., coordinate, None]
-                rotation = multiply(
-                    rotation,
-                    rotation_vector_to_quaternion(
-                        axis * joint_positions[..., coordinate, None]
-                    ),
-                )
-            positions.append(position)
-            rotations.append(rotation)
-            linear_velocities.append(velocity)
-            angular_velocities.append(angular_velocity)
+        position = state[..., None, :3]
+        rotation = state[..., None, 3:7]
+        velocity = state[..., None, 7:10]
+        angular_velocity = state[..., None, 10:13]
+        levels = [(position, rotation, velocity, angular_velocity)]
+        for parents, origin_position, origin_rotation, coordinates, axes in self.levels:
+            parent_rotation = rotation[..., parents, :]
+            offset = rotate(parent_rotation, origin_position)
+            position = position[..., parents, :] + offset
+            velocity = velocity[..., parents, :] + torch.cross(
+                angular_velocity[..., parents, :], offset, dim=-1
+            )
+            rotation = multiply(parent_rotation, origin_rotation.expand_as(parent_rotation))
+            angular_velocity = angular_velocity[..., parents, :] + rotate(rotation, axes) * (
+                joint_velocities[..., coordinates].unsqueeze(-1)
+            )
+            rotation = multiply(rotation, rotation_vector_to_quaternion(
+                axes * joint_positions[..., coordinates].unsqueeze(-1)
+            ))
+            levels.append((position, rotation, velocity, angular_velocity))
         return tuple(
-            torch.stack([values[index] for index in self.selected_indices], dim=-2)
-            for values in (positions, rotations, linear_velocities, angular_velocities)
+            torch.cat([level[component] for level in levels], dim=-2)[..., self.output_indices, :]
+            for component in range(4)
         )

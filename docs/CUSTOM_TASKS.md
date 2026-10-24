@@ -206,6 +206,18 @@ Reward and termination heads can be analytic, as in the included reference task.
 Learned reward or termination heads would need their own supervised labels and
 losses; they are not silently provided by the current implementation.
 
+These methods run for every model-window and imagination step, so their eager
+kernel count largely sets learner speed. Precompute anything that depends only on
+the command data (the included task caches reference link kinematics), and batch
+per-link loops. `compile_steps: true` fuses each step with `torch.compile`; the
+task methods must then be traceable: no Python branching on tensor values, no
+`.item()` and no host synchronization inside them.
+
+`goal` and `critic_features` receive the live state. If a reward term depends on
+the robot's pose relative to the command (for example global root position or
+heading), expose that relation in the goal or observation; a term the actor cannot
+observe only adds unexplained reward variance.
+
 ## Capture real transitions before reset
 
 Your environment exposes `model_task`, `num_envs`, `signature`, `read_state()`,

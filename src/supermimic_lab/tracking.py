@@ -11,19 +11,29 @@ from .geometry import (
 )
 
 
+GOAL_FRAMES = ("robot", "reference")
+
+
 class ReferenceTracking:
     """SI state with xyzw quaternions; no simulator imports or robot constants.
 
     The actor sees Table A.1 proprioception and future reference features only.
-    Future goals use the current reference's heading frame, an explicitly
-    documented choice where the paper does not specify the encoding.
+    ``goal_frame="robot"`` expresses future reference root poses and velocities
+    in the robot's current position and heading frame, as BeyondMimic's anchor
+    observations do, so the global root and world-velocity reward terms are
+    observable. ``"reference"`` reproduces the earlier encoding in the current
+    reference's own frame, which hides heading and position drift from the
+    actor and critic; it remains available to evaluate older checkpoints.
     """
 
     control_period = 0.02
 
-    def __init__(self, kinematics, motions, default_positions, future_frames=10):
+    def __init__(self, kinematics, motions, default_positions, future_frames=10, *, goal_frame="robot"):
+        if goal_frame not in GOAL_FRAMES:
+            raise ValueError(f"goal_frame must be one of {GOAL_FRAMES}")
         self.kinematics = kinematics
         self.motions = motions
+        self.goal_frame = goal_frame
         self.control_period = motions.control_period
         self.device = kinematics.device
         self.joint_count = len(kinematics.joint_names)
@@ -32,6 +42,7 @@ class ReferenceTracking:
         if self.default_positions.shape != (self.joint_count,):
             raise ValueError("default_positions must follow the configured joint order")
         goal_width = future_frames * (15 + 2 * self.joint_count)
+        critic_state_width = 13 + 2 * self.joint_count if goal_frame == "reference" else 10 + 2 * self.joint_count
         self.dimensions = ModelDimensions(
             state=13 + 2 * self.joint_count,
             action=self.joint_count,
@@ -41,8 +52,14 @@ class ReferenceTracking:
             model_features=14 + 4 * self.joint_count,
             model_outputs=12 + 2 * self.joint_count,
             state_errors=12 + 2 * self.joint_count,
-            critic=17 + 3 * self.joint_count + goal_width,
+            critic=critic_state_width + goal_width + self.joint_count + 4,
         )
+        # Reference link kinematics do not depend on the policy; compute them
+        # once instead of in every reward evaluation (about 13 floats per link
+        # and frame, e.g. ~0.35 GB for 15 links over 2.45 h at 50 Hz).
+        with torch.no_grad():
+            chunks = [kinematics.forward(states) for states in motions.states.split(65536)]
+            self.reference_links = tuple(torch.cat(parts) for parts in zip(*chunks))
         self.observation_noise = torch.tensor(
             [0.01] * self.joint_count + [0.5] * self.joint_count
             + [0.2] * 3 + [0.05] * 3 + [0.0] * self.joint_count,
@@ -58,13 +75,17 @@ class ReferenceTracking:
         gravity[..., 2] = -1
         return rotate(conjugate(state[..., 3:7]), gravity)
 
-    def encode_dynamics(self, state, action, context):
+    def _invariant_state(self, state):
+        """Root height, gravity, body-frame velocities and joints; no XY or yaw."""
         inverse_rotation = conjugate(state[..., 3:7])
         return torch.cat((
             state[..., 2:3], self._gravity(state),
             rotate(inverse_rotation, state[..., 7:10]),
-            rotate(inverse_rotation, state[..., 10:13]), state[..., 13:], action, context,
+            rotate(inverse_rotation, state[..., 10:13]), state[..., 13:],
         ), dim=-1)
+
+    def encode_dynamics(self, state, action, context):
+        return torch.cat((self._invariant_state(state), action, context), dim=-1)
 
     def dynamics_target(self, state, next_state):
         inverse_rotation = conjugate(state[..., 3:7])
@@ -106,10 +127,10 @@ class ReferenceTracking:
         ), dim=-1)
 
     def goal(self, state, reference_index):
-        reference = self.motions.states[reference_index]
         future = self.motions.states[self.motions.future_indices(reference_index, self.future_frames)]
-        inverse_heading = conjugate(heading(reference[..., 3:7]))[..., None, :]
-        displacement = future[..., :3] - reference[..., None, :3]
+        frame = state if self.goal_frame == "robot" else self.motions.states[reference_index]
+        inverse_heading = conjugate(heading(frame[..., 3:7]))[..., None, :]
+        displacement = future[..., :3] - frame[..., None, :3]
         relative_position = rotate(inverse_heading, displacement)
         relative_position = torch.cat((relative_position[..., :2], future[..., 2:3]), dim=-1)
         relative_rotation = multiply(inverse_heading.expand_as(future[..., 3:7]), future[..., 3:7])
@@ -128,7 +149,7 @@ class ReferenceTracking:
             reference_orientations,
             reference_linear,
             reference_angular,
-        ) = self.kinematics.forward(reference)
+        ) = (values[reference_index] for values in self.reference_links)
         heading_alignment = multiply(
             heading(state[..., 3:7]), conjugate(heading(reference[..., 3:7]))
         )
@@ -175,7 +196,9 @@ class ReferenceTracking:
         """Direct errors in SI units; global drift and aligned pose stay separate."""
         reference = self.motions.states[reference_index]
         positions, orientations, _, _ = self.kinematics.forward(state)
-        reference_positions, reference_orientations, _, _ = self.kinematics.forward(reference)
+        reference_positions, reference_orientations = (
+            values[reference_index] for values in self.reference_links[:2]
+        )
         alignment = multiply(heading(state[..., 3:7]), conjugate(heading(reference[..., 3:7])))
         anchor = torch.cat((state[..., :2], reference[..., 2:3]), dim=-1)
         aligned_positions = anchor[..., None, :] + rotate(
@@ -214,7 +237,13 @@ class ReferenceTracking:
         return 1 - (1 - height_probability) * (1 - tilt_probability)
 
     def critic_features(self, state, reference_index, context):
-        return torch.cat((state, self.goal(state, reference_index), context), dim=-1)
+        goal = self.goal(state, reference_index)
+        if self.goal_frame == "reference":
+            return torch.cat((state, goal, context), dim=-1)
+        # The robot-frame goal already carries the root pose error that the
+        # global reward terms depend on; absolute XY and yaw would only add
+        # unbounded, reward-irrelevant inputs to the critic.
+        return torch.cat((self._invariant_state(state), goal, context), dim=-1)
 
     def valid_starts(self, reference_index, horizon):
         return reference_index + horizon <= self.motions.frame_ends[reference_index]

@@ -20,7 +20,11 @@ from .runner import PolicySession
 def load_policy(path, environment, configuration):
     checkpoint = torch.load(path, map_location=environment.device, weights_only=True)
     if checkpoint["task_signature"] != environment.signature:
-        raise ValueError("Evaluation robot/reference contract differs from the checkpoint")
+        raise ValueError(
+            "Evaluation robot/reference contract differs from the checkpoint; "
+            "tracking checkpoints from before goal_frame existed need "
+            '{"goal_frame": "reference"} in the environment configuration'
+        )
     policy = MotionPolicy(environment.model_task.dimensions, configuration.algorithm).to(environment.device)
     policy.load_state_dict(checkpoint["learner"]["policy"])
     return PolicySession(policy, configuration.algorithm.history_frames)

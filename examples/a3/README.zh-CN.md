@@ -87,7 +87,8 @@ A3 本体、参数、动作重定向及名义物理设置与论文基准不同�
 ## 训练数据和演示视频
 
 运行结束后，可用 `scripts/export_a3_results.py` 导出配置、耗时、更新次数和完整动作
-评估数据。训练计时包含周期评估；进程总耗时还包含初始化和最终评估，结束后才可确定。
+评估数据。训练预算只计学习时间，不含周期评估；进程总耗时还包含周期评估、初始化和
+最终评估，结束后才可确定。
 命令见[英文示例](README.md#export-metrics-and-record-a-video)。
 
 `scripts/record_a3_video.py` 使用已有 Isaac Sim 的 MP4 编码扩展与 Newton 渲染器，

@@ -48,6 +48,11 @@ class SuperMimic:
             if scales.shape != self.error_scales.shape:
                 raise ValueError("state_error_scales must match the task's state-error dimension")
             self.error_scales = scales
+        self.model_step = self._model_step
+        self.imagine_step = self._imagine_step
+        if configuration.compile_steps:
+            self.model_step = torch.compile(self._model_step)
+            self.imagine_step = torch.compile(self._imagine_step)
 
     def predict(self, state, action, context):
         features = self.task.encode_dynamics(state, action, context)
@@ -62,23 +67,24 @@ class SuperMimic:
             transition.state, transition.next_state
         ))
 
+    def _model_step(self, prediction, action, context, next_state, valid):
+        prediction = self.predict(prediction, action, context)
+        error = self.task.state_error(prediction, next_state)
+        loss = (error / self.error_scales).square().sum(dim=-1) * valid
+        # An auto-reset is not a dynamics transition. Invalid window suffixes
+        # use logged states and carry no loss or gradient across the reset.
+        return torch.where(valid[:, None].bool(), prediction, next_state), loss
+
     def fit_dynamics(self):
         samples = self.replay.windows(self.config.model_batch_size, self.config.model_window)
         prediction = samples["state"][:, 0]
         accumulated = torch.zeros(prediction.shape[0], device=self.device)
         for step in range(self.config.model_window):
-            prediction = self.predict(prediction, samples["action"][:, step], samples["context"][:, step])
-            error = self.task.state_error(prediction, samples["next_state"][:, step])
-            accumulated = accumulated + (
-                (error / self.error_scales).square().sum(dim=-1)
-                * samples["valid"][:, step]
+            prediction, step_loss = self.model_step(
+                prediction, samples["action"][:, step], samples["context"][:, step],
+                samples["next_state"][:, step], samples["valid"][:, step],
             )
-            # An auto-reset is not a dynamics transition. Invalid window suffixes
-            # use logged states and carry no loss or gradient across the reset.
-            prediction = torch.where(
-                samples["valid"][:, step, None].bool(), prediction,
-                samples["next_state"][:, step],
-            )
+            accumulated = accumulated + step_loss
         loss = accumulated.mean()
         self.dynamics_optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -111,6 +117,18 @@ class SuperMimic:
         observation = self.task.observation(state, previous_action, context)
         return observation + (2 * torch.rand_like(observation) - 1) * self.task.observation_noise
 
+    def _imagine_step(self, state, history, reference_index, previous_action, context):
+        goal = self.task.goal(state, reference_index)
+        action = self.policy(history, goal)
+        state = self.predict(state, action, context)
+        reference_index = self.task.advance_reference(reference_index)
+        reward = self.task.reward(state, action, previous_action, reference_index)
+        termination = self.task.termination_probability(state, reference_index)
+        observation = self._noisy_observation(state, action, context)
+        history = torch.cat((history[:, 1:], observation[:, None]), dim=1)
+        critic_input = self.task.critic_features(state, reference_index, context).detach()
+        return state, history, reference_index, action, reward, termination, critic_input
+
     def improve_policy(self):
         start, logged_history = self._valid_initial_states()
         state = start["state"]
@@ -126,16 +144,12 @@ class SuperMimic:
         critic_inputs = [self.task.critic_features(state, reference_index, context).detach()]
         with frozen_weights(self.dynamics, self.critic):
             for _ in range(self.config.imagination_steps):
-                goal = self.task.goal(state, reference_index)
-                action = self.policy(history, goal)
-                state = self.predict(state, action, context)
-                reference_index = self.task.advance_reference(reference_index)
-                rewards.append(self.task.reward(state, action, previous_action, reference_index))
-                terminations.append(self.task.termination_probability(state, reference_index))
-                observation = self._noisy_observation(state, action, context)
-                history = torch.cat((history[:, 1:], observation[:, None]), dim=1)
-                previous_action = action
-                critic_inputs.append(self.task.critic_features(state, reference_index, context).detach())
+                state, history, reference_index, previous_action, reward, termination, critic_input = (
+                    self.imagine_step(state, history, reference_index, previous_action, context)
+                )
+                rewards.append(reward)
+                terminations.append(termination)
+                critic_inputs.append(critic_input)
             reward_tensor = torch.stack(rewards)
             termination_tensor = torch.stack(terminations)
             bootstrap = torch.zeros_like(reward_tensor[-1])

@@ -65,7 +65,7 @@ class EvaluationCallback:
         remaining_seconds = 1800
         if runner.config.max_hours is not None:
             remaining_seconds = min(
-                remaining_seconds, 3600 * runner.config.max_hours - runner.elapsed()
+                remaining_seconds, 3600 * runner.config.max_hours - runner.learning_seconds()
             )
         if remaining_seconds <= 0:
             return None
@@ -73,7 +73,7 @@ class EvaluationCallback:
             runner, f"{runner.iteration:06d}", time_limit_seconds=remaining_seconds
         )
         self.periodic_reports.append(report)
-        if not self.stop_on_plateau or runner.elapsed() < 3600:
+        if not self.stop_on_plateau or runner.learning_seconds() < 3600:
             return None
         recent = self.periodic_reports[-3:]
         fields = ("failures", "mean_normalized_return", "mean_tracking_seconds")

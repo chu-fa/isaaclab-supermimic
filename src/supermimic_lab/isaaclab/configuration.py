@@ -27,6 +27,9 @@ class TrackingEnvironmentConfig(DirectRLEnvCfg):
     motion_directory: str = ""
     source_motion_rate: float = 30.0
     future_frames: int = 10
+    # "robot": future reference poses relative to the robot's position/heading.
+    # "reference": the earlier self-relative encoding, for older checkpoints.
+    goal_frame: str = "robot"
     # Nominal physics is an explicit development setting, not paper-equivalent DR.
     randomization: str = "nominal"
     evaluation: bool = False

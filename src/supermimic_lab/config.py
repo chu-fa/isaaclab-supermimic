@@ -30,6 +30,11 @@ class AlgorithmConfig:
     # The paper does not specify state preprocessing. Unit scaling is explicit
     # here; None means the task's raw SI/tangent state errors in Equation 1.
     state_error_scales: tuple[float, ...] | None = None
+    # Execution option, not part of the objective: fuse each model-window and
+    # imagination step with torch.compile. Eager tasks with analytic kinematics
+    # launch thousands of small kernels per step; requires a working Inductor
+    # backend (Triton on CUDA, a C++ compiler on CPU).
+    compile_steps: bool = False
 
     def validate(self):
         for name in (
@@ -48,6 +53,8 @@ class AlgorithmConfig:
             raise ValueError("learning_rate must be finite and positive")
         if not 0 < self.discount < 1 or not 0 <= self.trace_decay <= 1:
             raise ValueError("Invalid discount or trace_decay")
+        if not isinstance(self.compile_steps, bool):
+            raise ValueError("compile_steps must be a boolean")
         if self.critic_minibatches > self.imagination_steps * self.policy_batch_size:
             raise ValueError("Critic minibatches would be empty")
         if self.state_error_scales is not None and any(

@@ -60,6 +60,7 @@ class SuperMimicRunner:
         self.environment_steps = 0
         self.previous_training_seconds = 0.0
         self.started = None
+        self.callback_seconds = 0.0
         self.source_checkpoint = None
         self.policy_session = PolicySession(self.algorithm.policy, self.config.algorithm.history_frames)
 
@@ -71,6 +72,14 @@ class SuperMimicRunner:
 
     def elapsed(self):
         return 0.0 if self.started is None else time.monotonic() - self.started
+
+    def learning_seconds(self):
+        """Wall-clock time of this run excluding task callbacks such as evaluation.
+
+        ``max_hours`` limits this quantity, matching the paper's accounting in
+        which checkpoint evaluations are not part of the training budget.
+        """
+        return 0.0 if self.started is None else self.elapsed() - self.callback_seconds
 
     def mark_collection_reset(self):
         """Call when a task evaluator resets physics between collection phases."""
@@ -100,7 +109,11 @@ class SuperMimicRunner:
                 "legacy weights are not imported"
             )
         if checkpoint["task_signature"] != self.environment.signature:
-            raise ValueError("Checkpoint robot/reference contract differs from the current task")
+            raise ValueError(
+                "Checkpoint robot/reference contract differs from the current task; "
+                "tracking checkpoints from before goal_frame existed need "
+                '{"goal_frame": "reference"} in the environment configuration'
+            )
         self.algorithm.load_state_dict(checkpoint["learner"])
         self.iteration = checkpoint["iteration"]
         self.environment_steps = checkpoint["environment_steps"]
@@ -187,6 +200,7 @@ class SuperMimicRunner:
                 return self.iteration
             self._collect(self.config.initial_collection_steps)
             self.started = time.monotonic()
+            self.callback_seconds = 0.0
             self._status(starting_iteration)
             collection_remainder = 0.0
             with (self.directory / "metrics.csv").open("w", newline="") as log_file:
@@ -235,10 +249,12 @@ class SuperMimicRunner:
                         raise FloatingPointError("A training metric became non-finite")
                     callback_reason = None
                     if after_update is not None and not stop_requested():
+                        callback_start = time.monotonic()
                         callback_reason = after_update(self)
+                        self.callback_seconds += time.monotonic() - callback_start
                     budget_done = (
                         self.config.max_hours is not None
-                        and self.elapsed() >= 3600 * self.config.max_hours
+                        and self.learning_seconds() >= 3600 * self.config.max_hours
                     )
                     reason = (
                         "user_signal" if stop_requested()
@@ -248,6 +264,7 @@ class SuperMimicRunner:
                         else None
                     )
                     metrics["elapsed_seconds"] = self.elapsed()
+                    metrics["learning_seconds"] = self.learning_seconds()
                     if self.iteration % self.config.log_interval == 0 or reason:
                         self._status(starting_iteration, reason)
                         if csv_writer is None:

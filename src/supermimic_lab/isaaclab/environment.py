@@ -63,7 +63,9 @@ class TrackingEnvironment(DirectRLEnv):
             cfg.motion_directory, len(joint_names), self.device,
             source_rate=cfg.source_motion_rate, control_period=self.step_dt,
         )
-        self.model_task = ReferenceTracking(kinematics, motions, self.default_positions, cfg.future_frames)
+        self.model_task = ReferenceTracking(
+            kinematics, motions, self.default_positions, cfg.future_frames, goal_frame=cfg.goal_frame
+        )
         self.sampler = ReturnSampler(motions, cfg.discount)
         self.previous_action = torch.zeros(self.num_envs, len(joint_names), device=self.device)
         self.context = torch.zeros(self.num_envs, self.model_task.dimensions.context, device=self.device)
@@ -82,6 +84,9 @@ class TrackingEnvironment(DirectRLEnv):
             "collision_exclusions": cfg.robot_spec["collision_exclusions"],
             "state_contract": "xyzw_link_origin_world_velocity_v1",
         }
+        if cfg.goal_frame != "reference":
+            # Omitted for the original encoding so existing signatures still match.
+            contract["goal_frame"] = cfg.goal_frame
         self.signature = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
         self.asset_contract = contract
 

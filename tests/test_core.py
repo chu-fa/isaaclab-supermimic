@@ -1,9 +1,12 @@
 """Numerical and learning behavior, without Isaac Lab or robot downloads."""
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import torch
 
@@ -218,6 +221,49 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(status["stop_reason"], "task_complete")
             self.assertEqual(status["iteration"], 1)
             self.assertTrue((Path(directory) / "last.pt").is_file())
+
+    @unittest.skipUnless(os.environ.get("SUPERMIMIC_TEST_COMPILE"), "set SUPERMIMIC_TEST_COMPILE=1; compiles with Inductor")
+    def test_compiled_steps_match_eager_updates(self):
+        results = []
+        for compiled in (False, True):
+            configuration = small_configuration().algorithm
+            configuration.compile_steps = compiled
+            torch.manual_seed(5)
+            environment = LinearEnvironment()
+            replay = SequenceReplay(64, 4, environment.model_task.dimensions, "cpu")
+            algorithm = SuperMimic(environment.model_task, replay, configuration)
+            for _ in range(32):
+                transition = environment.step(torch.randn(4, 1))
+                replay.append(transition)
+                algorithm.observe_transition(transition)
+            torch.manual_seed(9)
+            metrics = {**algorithm.fit_dynamics(), **algorithm.improve_policy()}
+            results.append((metrics, [value.detach().clone() for value in algorithm.policy.parameters()]))
+        (eager, eager_policy), (compiled, compiled_policy) = results
+        for name in ("model_loss", "policy_loss", "policy_gradient_norm", "imagined_reward"):
+            torch.testing.assert_close(compiled[name], eager[name], rtol=1e-4, atol=1e-6)
+        for compiled_value, eager_value in zip(compiled_policy, eager_policy):
+            torch.testing.assert_close(compiled_value, eager_value, rtol=1e-4, atol=1e-6)
+
+    def test_wall_clock_budget_excludes_callback_time(self):
+        clock = [0.0]
+        learning_seconds = []
+
+        def slow_evaluation(current):
+            learning_seconds.append(current.learning_seconds())
+            clock[0] += 1000.0
+            return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            configuration = small_configuration()
+            configuration.max_hours = 0.1
+            runner = SuperMimicRunner(LinearEnvironment(), configuration, directory)
+            with mock.patch("supermimic_lab.runner.time", SimpleNamespace(monotonic=lambda: clock[0])):
+                runner.learn(after_update=slow_evaluation)
+            status = json.loads((Path(directory) / "status.json").read_text())
+            self.assertEqual(status["stop_reason"], "iteration_limit")
+            self.assertEqual(status["iteration"], 2)
+            self.assertEqual(learning_seconds, [0.0, 0.0])
 
 
 if __name__ == "__main__":
