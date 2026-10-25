@@ -6,6 +6,13 @@ SuperMimic Lab is a SuperMimic training library built on Isaac Lab, primarily fo
 development across multiple personal robot motion control projects. It provides a reusable
 training interface and an AGIBOT A3 robot training example.
 
+![Left: reference motion. Right: AGIBOT A3 controlled by a trained SuperMimic policy.](docs/media/a3_reference_vs_policy.webp)
+
+*Left: reference motion. Right: AGIBOT A3 driven by the trained policy in Isaac Lab
+(Newton physics, nominal parameters). Each segment starts from the reference state at the
+time shown. Motions: Ubisoft LAFAN1 (CC BY-NC-ND 4.0), retargeted to A3. Recorded with
+`scripts/record_a3_comparison.py`.*
+
 **One repository contains both the reusable interface and the A3 application.**
 The core and optional robot examples can be installed separately:
 
@@ -27,7 +34,7 @@ endorsement from the paper authors or Isaac Lab maintainers.
   `SuperMimicRunner` interface.
 - Newton/MuJoCo-Warp and PhysX adapters passed bounded A3 interface checks.
 - The A3 example includes training commands, data specifications and evaluation
-  definitions. Training measurements and demonstration videos will be published separately.
+  definitions. Training measurements and full-length videos will be published separately.
 
 Multi-interface joint training, velocity-command control and hardware deployment
 are not implemented. Convergence, backend equivalence and paper-level performance

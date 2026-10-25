@@ -5,6 +5,12 @@
 SuperMimic Lab 是基于 Isaac Lab 的 SuperMimic 训练库，主要用于个人多个运控项目的开发。
 项目提供可跨项目复用的训练接口，并包含智元远征 A3 机器人训练示例。
 
+![左：参考动作；右：训练后的 SuperMimic 策略控制的智元远征 A3](docs/media/a3_reference_vs_policy.webp)
+
+*左：参考动作；右：训练后的策略在 Isaac Lab 中控制 A3（Newton 物理、名义参数）。
+各段从所示时刻的参考状态开始。动作来源：Ubisoft LAFAN1（CC BY-NC-ND 4.0），重定向到 A3。
+录制脚本为 `scripts/record_a3_comparison.py`。*
+
 **通用接口和 A3 示例位于同一个仓库。** 两个 Python 包可按需安装：
 
 | 包 | 用途 | 位置 |
@@ -21,7 +27,7 @@ A3 示例单向依赖通用包，其他项目可以只使用通用包与自己�
 - 已实现自回归世界模型、想象轨迹策略优化、critic、回放、检查点和评估流程。
 - 自定义任务使用 Isaac Lab 配置、Gym 注册和 `SuperMimicRunner` 接口。
 - Newton/MuJoCo-Warp 和 PhysX 适配均通过有限 A3 接口检查。
-- A3 示例提供训练命令、数据格式和评估定义；训练数据与演示视频后续单独发布。
+- A3 示例提供训练命令、数据格式和评估定义；训练数据与完整视频后续单独发布。
 
 多接口联合训练、速度指令控制和真机部署尚未实现；收敛、后端等价性及论文级
 效果尚未确立。详见[实现范围](docs/IMPLEMENTATION.md)与[验证记录](docs/VALIDATION.md)。

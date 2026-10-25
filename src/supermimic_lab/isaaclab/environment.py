@@ -278,9 +278,13 @@ class TrackingEnvironment(DirectRLEnv):
         )
 
     def reset_to_clips(self, clip_indices):
-        if len(clip_indices) != self.num_envs or not self.cfg.evaluation:
-            raise ValueError("Explicit clip reset requires evaluation mode and one clip per world")
-        self._evaluation_starts = self.model_task.motions.starts[clip_indices]
+        return self.reset_to_frames(self.model_task.motions.starts[clip_indices])
+
+    def reset_to_frames(self, frame_indices):
+        """Reset each world to the reference state at a motion-library frame."""
+        if len(frame_indices) != self.num_envs or not self.cfg.evaluation:
+            raise ValueError("Explicit reset requires evaluation mode and one frame per world")
+        self._evaluation_starts = torch.as_tensor(frame_indices, dtype=torch.long, device=self.device)
         return self.reset()
 
 
